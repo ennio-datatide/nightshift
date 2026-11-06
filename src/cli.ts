@@ -2,11 +2,19 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { findAgent } from './loader.js';
+import { Cron } from 'croner';
+import { describeErrors, findAgent, loadFolder, type AgentDefinition } from './loader.js';
 import { buildSession, describeOptions } from './policy.js';
 import { runAgent } from './runner.js';
+import { lastRun } from './store.js';
 
 const USAGE = `Usage: nightshift run <agent> [--agents <dir>] [--state <dir>] [--secrets <file>] [--dry-run]
+       nightshift check [--agents <dir>]
+       nightshift list [--agents <dir>] [--state <dir>]
+
+  run               start one agent now
+  check             validate every agent file in the folder
+  list              show each agent with its schedule, next run and last run
 
   --agents <dir>    folder of agent files (default ./agents)
   --state <dir>     folder for run records (default ./state)
@@ -26,6 +34,8 @@ async function main(argv: string[]): Promise<number> {
     },
   });
   const [command, name] = positionals;
+  if (!values.help && command === 'check') return check(values.agents);
+  if (!values.help && command === 'list') return list(values.agents, values.state);
   if (values.help || command !== 'run' || !name) {
     console.log(USAGE);
     return values.help ? 0 : 2;
@@ -47,6 +57,45 @@ async function main(argv: string[]): Promise<number> {
   }
   console.error(`${agent.name} failed (${record.status}): ${record.result}`);
   return 1;
+}
+
+async function check(dir: string): Promise<number> {
+  const results = await loadFolder(dir);
+  if (!results.length) {
+    console.error(`no agent files (.md) in ${dir}`);
+    return 1;
+  }
+  for (const result of results) {
+    if (result.agent) console.log(`ok ${result.agent.name}`);
+    else console.error(describeErrors(result));
+  }
+  return results.every((r) => r.agent) ? 0 : 1;
+}
+
+async function list(dir: string, stateDir: string): Promise<number> {
+  const results = await loadFolder(dir);
+  for (const { agent, file } of results) {
+    if (!agent) {
+      console.log(`${path.basename(file)}: broken, see nightshift check\n`);
+      continue;
+    }
+    const last = await lastRun(stateDir, agent.name);
+    console.log(`${agent.name}: ${agent.description}`);
+    console.log(`  schedule  ${schedule(agent)}`);
+    console.log(`  last run  ${last ? `${last.status}, ${formatTime(new Date(last.start), agent.timezone)}` : 'never'}\n`);
+  }
+  return results.every((r) => r.agent) ? 0 : 1;
+}
+
+function schedule({ schedule, timezone }: AgentDefinition): string {
+  if (!schedule) return 'manual';
+  const next = new Cron(schedule, { paused: true, timezone }).nextRun();
+  return `${schedule} (${timezone ?? 'local time'}), next ${next ? formatTime(next, timezone) : 'never'}`;
+}
+
+/** `2026-11-07 07:00` in the agent's time zone, or local time. */
+function formatTime(date: Date, timeZone?: string): string {
+  return date.toLocaleString('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'short' });
 }
 
 main(process.argv.slice(2)).then(

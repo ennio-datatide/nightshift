@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface RunRecord {
@@ -16,4 +16,14 @@ export interface RunRecord {
 export async function appendRun(stateDir: string, record: RunRecord): Promise<void> {
   await mkdir(stateDir, { recursive: true });
   await appendFile(path.join(stateDir, `${record.agent}.jsonl`), JSON.stringify(record) + '\n');
+}
+
+/** The newest record for `agent`, or undefined when it has never run. */
+export async function lastRun(stateDir: string, agent: string): Promise<RunRecord | undefined> {
+  const text = await readFile(path.join(stateDir, `${agent}.jsonl`), 'utf8').catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return '';
+    throw err;
+  });
+  const last = text.trimEnd().split('\n').pop();
+  return last ? (JSON.parse(last) as RunRecord) : undefined;
 }
