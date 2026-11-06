@@ -22,9 +22,54 @@ test('loads frontmatter settings and the prompt below them', async () => {
     cwd: path.join(dir, 'work'),
     model: 'haiku',
     maxTurns: 1,
+    secrets: [],
+    read: [],
+    run: [],
+    tools: [],
+    disallowedTools: [],
+    untrusted: false,
+    billing: 'subscription',
     prompt: 'Say hello.',
     file: path.join(dir, 'hello.md'),
   });
+});
+
+test('loads the privilege settings', async () => {
+  const dir = await agentsDir({
+    'p.md': [
+      '---',
+      'name: p',
+      'description: P',
+      'secrets: [MAIL_KEY]',
+      'read: [docs, /work/social]',
+      'run: ["npm run -s decide:*"]',
+      'tools: [Edit]',
+      'disallowedTools: [Write]',
+      'untrusted: true',
+      'billing: api',
+      '---',
+      'Do p.',
+    ].join('\n'),
+  });
+  const agent = await loadAgent(path.join(dir, 'p.md'));
+  assert.deepEqual(agent.secrets, ['MAIL_KEY']);
+  assert.deepEqual(agent.read, ['docs', '/work/social']);
+  assert.deepEqual(agent.run, ['npm run -s decide:*']);
+  assert.deepEqual(agent.tools, ['Edit']);
+  assert.deepEqual(agent.disallowedTools, ['Write']);
+  assert.equal(agent.untrusted, true);
+  assert.equal(agent.billing, 'api');
+});
+
+test('privilege settings of the wrong type are rejected', async () => {
+  const dir = await agentsDir({
+    'list.md': '---\nname: l\ndescription: x\nsecrets: MAIL_KEY\n---\nDo it.',
+    'flag.md': '---\nname: f\ndescription: x\nuntrusted: yes please\n---\nDo it.',
+    'bill.md': '---\nname: b\ndescription: x\nbilling: credit\n---\nDo it.',
+  });
+  await assert.rejects(loadAgent(path.join(dir, 'list.md')), /list\.md: secrets must be a list of names/);
+  await assert.rejects(loadAgent(path.join(dir, 'flag.md')), /flag\.md: untrusted must be true or false/);
+  await assert.rejects(loadAgent(path.join(dir, 'bill.md')), /bill\.md: billing must be subscription or api/);
 });
 
 test('cwd defaults to the folder of the agent file, absolute cwd is kept', async () => {
