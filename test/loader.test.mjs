@@ -183,7 +183,7 @@ test('every mistake in a file is reported, each with the file', async () => {
   assert.deepEqual(errors, [
     'name must be lowercase letters, digits and dashes, such as daily-summary, got "Bad Name"',
     'secrets must be a list of names (letters, digits and underscores, such as MAIL_KEY), got ["mail-key"]',
-    'permissionMode must be one of default, acceptEdits, bypassPermissions, plan, dontAsk, auto, got "yolo"',
+    'permissionMode must be dontAsk (the default) or plan, got "yolo" (unattended agents must not bypass permissions)',
     'effort must be one of low, medium, high, xhigh, max, got "huge"',
     'untrusted must be true or false, got 1',
     'the prompt below the frontmatter is empty',
@@ -209,7 +209,14 @@ test('review, deliver and mcpServers are checked field by field', async () => {
   ]);
   assert.deepEqual(await errorsOf(ok('a', 'deliver: { type: email, to: 5, cc: me }\n')), [
     'deliver.to must be a secret name or an address, got 5',
-    'unknown setting "deliver.cc"; email delivery takes type, to, from',
+    'unknown setting "deliver.cc"; email delivery takes type, to, from, subject',
+  ]);
+  assert.deepEqual(await errorsOf(ok('a', 'deliver: command\n')), [
+    'deliver: command names no command; write deliver: { type: command, command: "<command that receives the text on stdin>" }',
+  ]);
+  assert.deepEqual(await errorsOf(ok('a', 'deliver: { type: email, to: REPORT_TO, subject: Nightshift test }\n')), []);
+  assert.deepEqual(await errorsOf(ok('a', 'deliver: { type: email, subject: [x] }\n')), [
+    'deliver.subject must be text, got ["x"]',
   ]);
   assert.deepEqual(await errorsOf(ok('a', 'mcpServers: [files]\n')), [
     'mcpServers must be an object of server configs by name, got ["files"]',
@@ -251,4 +258,13 @@ test('an untrusted agent with run patterns must have review', async () => {
   assert.deepEqual(await errorsOf(ok('a', 'untrusted: true\nrun: ["echo post:*"]\nreview: { tools: ["Bash(echo post:*)"] }\n')), []);
   assert.deepEqual(await errorsOf(ok('a', 'untrusted: true\n')), []);
   assert.deepEqual(await errorsOf(ok('a', 'run: ["echo post:*"]\n')), []);
+});
+
+test('permissionMode allows only dontAsk and plan: unattended agents never bypass permissions', async () => {
+  for (const mode of ['dontAsk', 'plan']) assert.deepEqual(await errorsOf(ok('a', `permissionMode: ${mode}\n`)), [], mode);
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'default', 'auto']) {
+    assert.deepEqual(await errorsOf(ok('a', `permissionMode: ${mode}\n`)), [
+      `permissionMode must be dontAsk (the default) or plan, got "${mode}" (unattended agents must not bypass permissions)`,
+    ], mode);
+  }
 });

@@ -63,20 +63,21 @@ export function createReviewer(agent: AgentDefinition, options: Options, deps: R
 }
 
 export function reviewPrompt(agent: AgentDefinition, tool: string, input: unknown): string {
-  const data = JSON.stringify(input, null, 2) ?? 'null';
-  // A fence longer than any run of backticks in the data, so the data cannot close it.
-  const longest = Math.max(0, ...(data.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = '`'.repeat(Math.max(3, longest + 1));
   return [
     `Agent: ${agent.name}`,
     `Purpose: ${agent.description}`,
     `Owner's rules: ${agent.review?.instructions ?? 'none beyond the purpose'}`,
     '',
     `The action, a call to the tool ${tool}, as data:`,
-    `${fence}json`,
-    data,
-    fence,
+    fenced(JSON.stringify(input, null, 2) ?? 'null', 'json'),
   ].join('\n');
+}
+
+/** `text` in a fence longer than any run of backticks in it, so the text cannot close the fence. */
+export function fenced(text: string, lang: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}${lang}\n${text}\n${fence}`;
 }
 
 async function ask(query: QueryFn, prompt: string, options: Options, abortController: AbortController): Promise<Verdict> {

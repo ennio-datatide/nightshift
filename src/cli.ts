@@ -53,9 +53,14 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const record = await runAgent(agent, { query, stateDir: values.state, secretsFile });
+  if (record.delivered.startsWith('failed')) console.error(`${agent.name}: delivery ${record.delivered}`);
+  if (record.status === 'skipped') {
+    console.log(`${agent.name} skipped: ${record.result}`);
+    return 0;
+  }
   if (record.status === 'success') {
     console.log(record.result);
-    return 0;
+    return record.delivered.startsWith('failed') ? 1 : 0;
   }
   console.error(`${agent.name} failed (${record.status}): ${record.result}`);
   return 1;

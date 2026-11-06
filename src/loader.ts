@@ -6,9 +6,8 @@ import { parse } from 'yaml';
 
 export type Delivery =
   | 'email'
-  | 'command'
   | 'log'
-  | { type: 'email'; to?: string; from?: string }
+  | { type: 'email'; to?: string; from?: string; subject?: string }
   | { type: 'command'; command: string }
   | { type: 'log' };
 
@@ -24,7 +23,8 @@ export interface AgentDefinition {
   /** Command run first; the agent is skipped when there is nothing to do. */
   gate?: string;
   model?: string;
-  permissionMode?: PermissionMode;
+  /** Only modes that never ask and never bypass: `dontAsk` (the default) or `plan`. */
+  permissionMode?: Extract<PermissionMode, 'dontAsk' | 'plan'>;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   maxTurns?: number;
   maxBudgetUsd?: number;
@@ -103,10 +103,13 @@ const isTimezone = (v: unknown): boolean => {
   }
 };
 
-const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'];
-const DELIVERY_FIELDS = { email: ['type', 'to', 'from'], command: ['type', 'command'], log: ['type'] } as const;
+const PERMISSION_MODES: PermissionMode[] = ['dontAsk', 'plan'];
+const DELIVERY_FIELDS = { email: ['type', 'to', 'from', 'subject'], command: ['type', 'command'], log: ['type'] } as const;
 
 const deliverRule: Rule = (value, key) => {
+  if (value === 'command') {
+    return [`${key}: command names no command; write ${key}: { type: command, command: "<command that receives the text on stdin>" }`];
+  }
   if (typeof value === 'string' && value in DELIVERY_FIELDS) return [];
   if (!isObject(value) || !(typeof value.type === 'string' && value.type in DELIVERY_FIELDS)) {
     return [wrong(key, 'email, command, log or an object with a type', value)];
@@ -120,6 +123,9 @@ const deliverRule: Rule = (value, key) => {
     if (type === 'email' && value[field] !== undefined && !isText(value[field])) {
       errors.push(wrong(`${key}.${field}`, 'a secret name or an address', value[field]));
     }
+  }
+  if (type === 'email' && value.subject !== undefined && !isText(value.subject)) {
+    errors.push(wrong(`${key}.subject`, 'text', value.subject));
   }
   return [...errors, ...unknownKeys(key, value, [...DELIVERY_FIELDS[type]], `${type} delivery`)];
 };
@@ -145,7 +151,10 @@ const RULES: Record<string, Rule> = {
   run: rule((v) => isList(v), 'a list of command patterns'),
   tools: rule((v) => isList(v), 'a list of tool names'),
   disallowedTools: rule((v) => isList(v), 'a list of tool rules'),
-  permissionMode: oneOf(PERMISSION_MODES),
+  permissionMode: (value, key) =>
+    PERMISSION_MODES.includes(value as PermissionMode)
+      ? []
+      : [wrong(key, 'dontAsk (the default) or plan', value, 'unattended agents must not bypass permissions')],
   model: rule(isText, 'a model name'),
   effort: oneOf(['low', 'medium', 'high', 'xhigh', 'max']),
   maxTurns: rule((v) => Number.isInteger(v) && (v as number) > 0, 'a positive whole number'),

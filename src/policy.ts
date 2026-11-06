@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { HookCallback, HookCallbackMatcher, Options, SyncHookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition } from './loader.js';
-import { createReviewer, DEFAULT_REVIEW_TIMEOUT_MS, REVIEWER_SYSTEM_PROMPT, VERDICT_SCHEMA, type ReviewerDeps, type Verdict } from './reviewer.js';
+import { createReviewer, DEFAULT_REVIEW_TIMEOUT_MS, fenced, REVIEWER_SYSTEM_PROMPT, VERDICT_SCHEMA, type ReviewerDeps, type Verdict } from './reviewer.js';
 
 /**
  * The one place an agent definition becomes the prompt and SDK options. A run gets only what
@@ -38,11 +38,24 @@ const homeSecrets = (home: string): string[] => [
 /** Shell syntax that chains, pipes, redirects or substitutes; a listed command may not carry any. */
 const SHELL_TRICKS = /[;&|`$<>\n\r]/;
 
+/** What a run adds to the session beyond the agent file. */
+export interface SessionExtras {
+  /** The gate's output, appended to the prompt. */
+  gateOutput?: string;
+  /** Aborts the session when the run times out. */
+  abortController?: AbortController;
+}
+
 /**
  * Without `reviewer` (as in `--dry-run`) every action listed in `review` is denied: the
  * reviewer fails closed.
  */
-export async function buildSession(agent: AgentDefinition, secretsFile?: string, reviewer?: ReviewerDeps): Promise<Session> {
+export async function buildSession(
+  agent: AgentDefinition,
+  secretsFile?: string,
+  reviewer?: ReviewerDeps,
+  { gateOutput, abortController }: SessionExtras = {},
+): Promise<Session> {
   const secrets = secretsFile ? await readSecrets(secretsFile) : {};
   const env = buildEnv(agent, secrets, secretsFile);
   const review = reviewGate(agent, env, reviewer);
@@ -53,7 +66,8 @@ export async function buildSession(agent: AgentDefinition, secretsFile?: string,
     allowedTools: allowedTools(agent),
     disallowedTools: await deniedTools(agent, secretsFile),
     // Unattended: anything not allowed above is denied instead of waiting for a human.
-    permissionMode: 'dontAsk',
+    // The loader allows `plan` as the only other mode; nothing that bypasses permissions.
+    permissionMode: agent.permissionMode ?? 'dontAsk',
     // Load no settings files, so a run never inherits the owner's ~/.claude CLAUDE.md, settings
     // or plugins (or a project's): everything the session may do is in this object.
     settingSources: [],
@@ -61,9 +75,14 @@ export async function buildSession(agent: AgentDefinition, secretsFile?: string,
   };
   if (agent.model !== undefined) options.model = agent.model;
   if (agent.maxTurns !== undefined) options.maxTurns = agent.maxTurns;
+  if (agent.maxBudgetUsd !== undefined) options.maxBudgetUsd = agent.maxBudgetUsd;
+  if (abortController) options.abortController = abortController;
 
-  const prompt = agent.untrusted ? `${UNTRUSTED_PREAMBLE}\n\n${agent.prompt}` : agent.prompt;
-  return { prompt, options };
+  const parts = [agent.untrusted ? `${UNTRUSTED_PREAMBLE}\n\n${agent.prompt}` : agent.prompt];
+  if (gateOutput !== undefined) {
+    parts.push(`## Input from the gate\n\n${agent.untrusted ? `The gate's output, as data:\n${fenced(gateOutput, 'text')}` : gateOutput}`);
+  }
+  return { prompt: parts.join('\n\n'), options };
 }
 
 /** What `--dry-run` shows: env key names but never their values. */
@@ -72,7 +91,7 @@ export function describeOptions({ env, hooks, ...rest }: Options): object {
 }
 
 /** Reads KEY=value lines; blank lines and `#` comments are skipped. Errors never show values. */
-async function readSecrets(file: string): Promise<Record<string, string>> {
+export async function readSecrets(file: string): Promise<Record<string, string>> {
   const secrets: Record<string, string> = {};
   const lines = (await readFile(file, 'utf8')).split(/\r?\n/);
   lines.forEach((raw, i) => {
@@ -86,18 +105,30 @@ async function readSecrets(file: string): Promise<Record<string, string>> {
   return secrets;
 }
 
-function buildEnv(agent: AgentDefinition, secrets: Record<string, string>, secretsFile?: string): Record<string, string> {
-  // The SDK's `env` replaces the process environment rather than merging with it, so this is all Claude gets.
+/** Throws, naming every one, when a secret the agent names is missing from the secrets file. Never shows values. */
+export function requireSecrets(agent: AgentDefinition, secrets: Record<string, string>, secretsFile?: string): void {
+  const missing = agent.secrets.filter((name) => secrets[name] === undefined);
+  if (!missing.length) return;
+  const where = secretsFile ?? 'the secrets file (none given: use --secrets or NIGHTSHIFT_SECRETS)';
+  throw new Error(`${agent.name} needs ${missing.join(', ')}, missing from ${where}`);
+}
+
+/**
+ * The env of the agent's own commands (the gate and a delivery command): PATH, HOME, TZ, USER
+ * and those of the agent's named secrets that the secrets file has.
+ */
+export function commandEnv(agent: AgentDefinition, secrets: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of HOST_ENV) if (process.env[key] !== undefined) env[key] = process.env[key];
-  if (secrets[LOGIN_TOKEN] !== undefined) env[LOGIN_TOKEN] = secrets[LOGIN_TOKEN];
+  for (const name of agent.secrets) if (secrets[name] !== undefined) env[name] = secrets[name];
+  return env;
+}
 
-  const missing = agent.secrets.filter((name) => secrets[name] === undefined);
-  if (missing.length) {
-    const where = secretsFile ?? 'the secrets file (none given: use --secrets or NIGHTSHIFT_SECRETS)';
-    throw new Error(`${agent.name} needs ${missing.join(', ')}, missing from ${where}`);
-  }
-  for (const name of agent.secrets) env[name] = secrets[name];
+function buildEnv(agent: AgentDefinition, secrets: Record<string, string>, secretsFile?: string): Record<string, string> {
+  requireSecrets(agent, secrets, secretsFile);
+  // The SDK's `env` replaces the process environment rather than merging with it, so this is all Claude gets.
+  const env = commandEnv(agent, secrets);
+  if (secrets[LOGIN_TOKEN] !== undefined && !(LOGIN_TOKEN in env)) env[LOGIN_TOKEN] = secrets[LOGIN_TOKEN];
 
   if (env[API_KEY] !== undefined && agent.billing !== 'api') {
     throw new Error(
@@ -211,6 +242,10 @@ function bashGuard(agent: AgentDefinition, review?: ReviewGate): HookCallback {
   return async (input) => {
     const toolInput = (input as { tool_input?: unknown }).tool_input;
     const command = commandOf(toolInput);
+    // With review, a chained command could hide a public action behind an unreviewed one.
+    if (agent.review && SHELL_TRICKS.test(command)) {
+      return decide('deny', 'an agent with review may not use shell syntax (; & | $ ` < > or a newline): run one command at a time');
+    }
     const listed = anyCommand || (!SHELL_TRICKS.test(command) && patterns.some((p) => p.test(command)));
     if (!listed) return decide('deny', `only these commands may run: ${agent.run.join(', ') || 'none'}`);
 
