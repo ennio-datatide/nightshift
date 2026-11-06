@@ -16,7 +16,13 @@ export function runShell(
   { cwd, env, input = '', timeoutMs }: { cwd: string; env: Record<string, string>; input?: string; timeoutMs: number },
 ): Promise<ShellResult> {
   return new Promise((resolve) => {
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env, timeout: timeoutMs, stdio: 'pipe' });
+    const child = spawn('/bin/sh', ['-c', command], { cwd, env, stdio: 'pipe' });
+    // Our own timer rather than spawn's `timeout`, whose timer outlives a command that cannot start.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
     let stdout = '';
     let stderr = '';
     let error: string | undefined;
@@ -26,9 +32,9 @@ export function runShell(
     // A command that does not read its stdin closes it early; that is not a failure.
     child.stdin.on('error', () => {});
     child.stdin.end(input);
-    // Node kills the command when `timeout` passes, and only then sets `killed`.
     child.on('close', (code) => {
-      resolve({ code, stdout, stderr, timedOut: child.killed, error });
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr, timedOut, error });
     });
   });
 }

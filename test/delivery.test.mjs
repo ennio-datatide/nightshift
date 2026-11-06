@@ -57,23 +57,47 @@ const exists = (p) => access(p).then(() => true, () => false);
 
 // Gate
 
-test('a gate that exits non-zero skips the run without starting Claude', async () => {
-  const { record, calls, state } = await run('gate: "echo some news; exit 3"', [result('x')]);
+test('a gate that exits 1 means nothing to do: the run is skipped quietly without starting Claude', async () => {
+  const { record, calls, state } = await run('gate: "echo some news; exit 1"', [result('x')]);
   assert.equal(calls.length, 0);
   assert.equal(record.status, 'skipped');
-  assert.match(record.result, /the gate exited with code 3/);
-  assert.equal(record.gate.code, 3);
+  assert.equal(record.result, 'nothing to do');
+  assert.equal(record.gate.code, 1);
   assert.equal(record.delivered, 'log');
   const written = JSON.parse((await readFile(path.join(state, 'p.jsonl'), 'utf8')).trim());
   assert.deepEqual(written, record);
 });
 
-test('a gate with empty output skips the run', async () => {
+test('a gate with empty output skips the run quietly', async () => {
   const { record, calls } = await run('gate: "printf \'  \\n\'"', [result('x')]);
   assert.equal(calls.length, 0);
   assert.equal(record.status, 'skipped');
-  assert.match(record.result, /the gate printed nothing/);
+  assert.equal(record.result, 'nothing to do');
   assert.equal(record.gate.code, 0);
+});
+
+const EMAIL = 'deliver: { type: email, to: REPORT_TO, from: bot@example.com }';
+
+test('a gate exiting with another code is a gate-error, delivered as a failure notice', async () => {
+  const { record, calls, fetches } = await run(`gate: "echo broken >&2; exit 3"\n${EMAIL}`, [result('x')]);
+  assert.equal(calls.length, 0);
+  assert.equal(record.status, 'gate-error');
+  assert.equal(record.result, 'the gate exited with code 3: broken');
+  assert.deepEqual(record.gate, { code: 3, stderr: 'broken' });
+  assert.equal(record.delivered, 'email');
+  assert.equal(JSON.parse(fetches[0].init.body).text, 'p failed: gate-error: the gate exited with code 3: broken');
+});
+
+test('a gate that cannot start is a gate-error, delivered as a failure notice', async () => {
+  const s = await setup(`gate: "true"\n${EMAIL}`);
+  const f = fakeFetch();
+  const q = fakeQuery([result('x')]);
+  const agent = { ...s.agent, cwd: path.join(s.dir, 'missing') };
+  const record = await runAgent(agent, { query: q.query, stateDir: s.state, secretsFile: s.secretsFile, fetch: f.fetch });
+  assert.equal(q.calls.length, 0);
+  assert.equal(record.status, 'gate-error');
+  assert.match(record.result, /^the gate could not start: /);
+  assert.equal(f.calls.length, 1);
 });
 
 test('the gate runs in cwd with the minimal env and the named secrets, and its output is appended to the prompt', async () => {

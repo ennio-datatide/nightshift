@@ -89,20 +89,25 @@ async function session(agent: AgentDefinition, deps: RunDeps, secrets: Record<st
   return outcome;
 }
 
-/** Runs the gate in `cwd` with the agent's command env; nothing to do (non-zero exit or no output) skips the run. */
+/**
+ * Runs the gate in `cwd` with the agent's command env. Exit 0 with output runs the agent; exit 0
+ * with no output or exit 1 means nothing to do; anything else is a gate-error, delivered as a failure.
+ */
 async function runGate(agent: AgentDefinition, gate: string, secrets: Record<string, string>): Promise<{ output: string } | { skip: Outcome }> {
   const run = await runShell(gate, { cwd: agent.cwd, env: commandEnv(agent, secrets), timeoutMs: GATE_TIMEOUT_MS });
   const output = run.stdout.trim().slice(0, GATE_OUTPUT_LIMIT);
   if (run.code === 0 && output) return { output };
   const stderr = run.stderr.trim().slice(0, 300);
+  const ended = { code: run.code, stderr };
+  if (!run.error && !run.timedOut && (run.code === 0 || run.code === 1)) {
+    return { skip: { status: 'skipped', turns: null, costUsd: null, result: 'nothing to do', gate: ended } };
+  }
   const reason = run.error
     ? `the gate could not start: ${run.error}`
     : run.timedOut
       ? 'the gate did not finish within 2 minutes'
-      : run.code !== 0
-        ? `the gate exited with code ${run.code}${stderr ? `: ${stderr}` : ''}`
-        : 'the gate printed nothing';
-  return { skip: { status: 'skipped', turns: null, costUsd: null, result: reason, gate: { code: run.code, stderr } } };
+      : `the gate exited with code ${run.code}${stderr ? `: ${stderr}` : ''}`;
+  return { skip: { status: 'gate-error', turns: null, costUsd: null, result: reason, gate: ended } };
 }
 
 /** A failure is always delivered as a notice; a success unless quietWhen matches; a skip never. */
