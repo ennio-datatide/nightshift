@@ -19,7 +19,7 @@ const USAGE = `Usage: nightshift run <agent> [--agents <dir>] [--state <dir>] [-
   --agents <dir>    folder of agent files (default ./agents)
   --state <dir>     folder for run records (default ./state)
   --secrets <file>  KEY=value file read for each run (default $NIGHTSHIFT_SECRETS)
-  --dry-run         show the prompt and options (env key names only) without starting Claude`;
+  --dry-run         show the prompt, options (env key names only) and reviewed actions without starting Claude`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -47,6 +47,8 @@ async function main(argv: string[]): Promise<number> {
   if (values['dry-run']) {
     const { prompt, options } = await buildSession(agent, secretsFile);
     console.log(`Prompt:\n${prompt}\n\nOptions:\n${JSON.stringify(describeOptions(options), null, 2)}`);
+    const review = agent.review ? agent.review.tools.map((t) => `  ${t}`).join('\n') : '  none';
+    console.log(`\nReviewed before running (public actions):\n${review}`);
     return 0;
   }
 

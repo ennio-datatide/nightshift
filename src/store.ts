@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { ReviewDecision } from './reviewer.js';
 
 export interface RunRecord {
   agent: string;
@@ -10,6 +11,8 @@ export interface RunRecord {
   turns: number | null;
   costUsd: number | null;
   result: string;
+  /** Every reviewer decision on a public action during the run, in order. */
+  reviews: ReviewDecision[];
 }
 
 /** Appends one run to `<stateDir>/<agent>.jsonl`; records are never rewritten. */

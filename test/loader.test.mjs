@@ -46,6 +46,7 @@ test('loads the privilege settings', async () => {
       'tools: [Edit]',
       'disallowedTools: [Write]',
       'untrusted: true',
+      'review: { tools: ["Bash(npm run -s decide:*)"] }',
       'billing: api',
       '---',
       'Do p.',
@@ -196,7 +197,7 @@ test('every mistake in a file is reported, each with the file', async () => {
 
 test('review, deliver and mcpServers are checked field by field', async () => {
   assert.deepEqual(await errorsOf(ok('a', 'review: { tools: Bash, instructions: [x], when: always }\n')), [
-    'review.tools must be a list of tool patterns, got "Bash"',
+    'review.tools must be a list of tool patterns, each Bash(<command pattern>) or a tool name, got "Bash"',
     'review.instructions must be text, got ["x"]',
     'unknown setting "review.when"; review takes tools, instructions',
   ]);
@@ -234,4 +235,20 @@ test('findAgent ignores broken files of other agents', async () => {
 test('findAgent fails when a subagent it names is broken', async () => {
   const dir = await agentsDir({ 'a.md': ok('boss', 'subagents: [helper]\n'), 'b.md': ok('helper', 'effort: huge\n') });
   await assert.rejects(findAgent(dir, 'boss'), /boss uses subagent helper, which is broken:\n.*b\.md: effort must be one of/);
+});
+
+test('review patterns are Bash(<command pattern>) or a tool name', async () => {
+  assert.deepEqual(await errorsOf(ok('a', 'review: { tools: ["Bash(echo post:*)", mcp__social__post, Bash] }\n')), []);
+  assert.deepEqual(await errorsOf(ok('a', 'review: { tools: ["Edit(notes/*)"] }\n')), [
+    'review.tools must be a list of tool patterns, each Bash(<command pattern>) or a tool name, got ["Edit(notes/*)"]',
+  ]);
+});
+
+test('an untrusted agent with run patterns must have review', async () => {
+  assert.deepEqual(await errorsOf(ok('a', 'untrusted: true\nrun: ["echo post:*"]\n')), [
+    'untrusted agents must review their public actions: add review with the tools that act in public',
+  ]);
+  assert.deepEqual(await errorsOf(ok('a', 'untrusted: true\nrun: ["echo post:*"]\nreview: { tools: ["Bash(echo post:*)"] }\n')), []);
+  assert.deepEqual(await errorsOf(ok('a', 'untrusted: true\n')), []);
+  assert.deepEqual(await errorsOf(ok('a', 'run: ["echo post:*"]\n')), []);
 });

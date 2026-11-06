@@ -88,6 +88,8 @@ const oneOf = (choices: readonly string[]): Rule =>
 const unknownKeys = (key: string, value: Record<string, unknown>, allowed: string[], what: string): string[] =>
   Object.keys(value).filter((k) => !allowed.includes(k)).map((k) => `unknown setting "${key}.${k}"; ${what} takes ${allowed.join(', ')}`);
 
+/** `Bash(<command pattern>)`, matched like `run`, or a bare tool name such as `mcp__social__post`. */
+const isReviewPattern = (v: string): boolean => /^Bash\(.+\)$/s.test(v) || /^[A-Za-z0-9_-]+$/.test(v);
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const isName = (v: unknown): boolean => typeof v === 'string' && NAME.test(v);
@@ -162,7 +164,9 @@ const RULES: Record<string, Rule> = {
   review: (value, key) => {
     if (!isObject(value)) return [wrong(key, 'an object with tools and instructions', value)];
     const errors: string[] = [];
-    if (!isList(value.tools) || !value.tools.length) errors.push(wrong(`${key}.tools`, 'a list of tool patterns', value.tools));
+    if (!isList(value.tools, isReviewPattern) || !value.tools.length) {
+      errors.push(wrong(`${key}.tools`, 'a list of tool patterns, each Bash(<command pattern>) or a tool name', value.tools));
+    }
     if (value.instructions !== undefined && !isText(value.instructions)) {
       errors.push(wrong(`${key}.instructions`, 'text', value.instructions));
     }
@@ -209,6 +213,9 @@ export async function checkFile(file: string): Promise<LoadResult> {
   const allowed = Object.keys(RULES);
   for (const key of Object.keys(settings)) {
     if (!allowed.includes(key)) errors.push(`unknown setting "${key}"; the settings are ${allowed.join(', ')}`);
+  }
+  if (settings.untrusted === true && Array.isArray(settings.run) && settings.run.length && settings.review === undefined) {
+    errors.push('untrusted agents must review their public actions: add review with the tools that act in public');
   }
   const prompt = match[2].trim();
   if (!prompt) errors.push('the prompt below the frontmatter is empty');
