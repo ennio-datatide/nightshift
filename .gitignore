@@ -1,0 +1,6 @@
+.scratch/
+node_modules/
+dist/
+*.log
+secrets.env
+state/
