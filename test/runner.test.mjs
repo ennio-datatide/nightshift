@@ -107,7 +107,8 @@ process.env.CLAUDE_CODE_OAUTH_TOKEN = 'runner-token';
 
 test('Claude gets a minimal env: PATH, HOME, TZ, USER, the login token and only the named secrets', async () => {
   const { options } = await optionsFor('secrets: [MAIL_KEY]');
-  assert.deepEqual(Object.keys(options.env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'MAIL_KEY', 'PATH', 'TZ', 'USER']);
+  assert.deepEqual(Object.keys(options.env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'ENABLE_CLAUDEAI_MCP_SERVERS', 'HOME', 'MAIL_KEY', 'PATH', 'TZ', 'USER']);
+  assert.equal(options.env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false', 'no claude.ai connectors of the owner');
   assert.equal(options.env.MAIL_KEY, 'fake-mail');
   assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, 'fake-token', 'the token comes from the secrets file');
   assert.equal(options.env.PATH, process.env.PATH);
@@ -115,7 +116,7 @@ test('Claude gets a minimal env: PATH, HOME, TZ, USER, the login token and only 
 
 test('the login token is never taken from the runner env', async () => {
   const { options } = await optionsFor('', 'MAIL_KEY=fake-mail\n');
-  assert.deepEqual(Object.keys(options.env).sort(), ['HOME', 'PATH', 'TZ', 'USER']);
+  assert.deepEqual(Object.keys(options.env).sort(), ['ENABLE_CLAUDEAI_MCP_SERVERS', 'HOME', 'PATH', 'TZ', 'USER']);
 });
 
 test('a named secret missing from the secrets file stops the run before Claude starts', async () => {
@@ -335,7 +336,7 @@ test('the reviewer has no tools, no settings, one turn and the login only, and s
   assert.equal(options.permissionMode, 'dontAsk');
   assert.equal(options.model, 'haiku');
   assert.ok(!('hooks' in options) && !('mcpServers' in options));
-  assert.deepEqual(Object.keys(options.env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'PATH', 'TZ', 'USER']);
+  assert.deepEqual(Object.keys(options.env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'ENABLE_CLAUDEAI_MCP_SERVERS', 'HOME', 'PATH', 'TZ', 'USER']);
   assert.equal(options.outputFormat.type, 'json_schema');
   assert.match(options.systemPrompt, /no tools/);
   assert.match(prompt, /Agent: p\nPurpose: P\nOwner's rules: Reject rude replies\./);

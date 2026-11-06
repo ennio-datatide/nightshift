@@ -268,3 +268,10 @@ test('permissionMode allows only dontAsk and plan: unattended agents never bypas
     ], mode);
   }
 });
+
+test('skills names skills in skillsDir, so skills without skillsDir is an error', async () => {
+  assert.deepEqual(await errorsOf(ok('a', 'skills: [codeword]\n')), [
+    'skills names skills in skillsDir: add skillsDir, the folder that holds them (each a subfolder with SKILL.md)',
+  ]);
+  assert.deepEqual(await errorsOf(ok('a', 'skillsDir: skills\n')), []);
+});

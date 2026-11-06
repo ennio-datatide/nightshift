@@ -226,6 +226,9 @@ export async function checkFile(file: string): Promise<LoadResult> {
   if (settings.untrusted === true && Array.isArray(settings.run) && settings.run.length && settings.review === undefined) {
     errors.push('untrusted agents must review their public actions: add review with the tools that act in public');
   }
+  if (settings.skills !== undefined && settings.skillsDir === undefined) {
+    errors.push('skills names skills in skillsDir: add skillsDir, the folder that holds them (each a subfolder with SKILL.md)');
+  }
   const prompt = match[2].trim();
   if (!prompt) errors.push('the prompt below the frontmatter is empty');
 
