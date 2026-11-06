@@ -101,6 +101,7 @@ export async function buildSession(
   if (agent.mcpServers) options.mcpServers = mcpServers(agent, env);
   if (agent.model !== undefined) options.model = agent.model;
   if (agent.maxTurns !== undefined) options.maxTurns = agent.maxTurns;
+  if (agent.effort !== undefined) options.effort = agent.effort;
   if (agent.maxBudgetUsd !== undefined) options.maxBudgetUsd = agent.maxBudgetUsd;
   if (abortController) options.abortController = abortController;
 

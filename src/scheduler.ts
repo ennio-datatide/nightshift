@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs';
+import { watch as fsWatch } from 'node:fs';
 import { Cron } from 'croner';
 import { loadFolder, type AgentDefinition } from './loader.js';
 import { appendRun, lastRun, pruneRuns, readDaemonState, writeDaemonState, type RunRecord } from './store.js';
@@ -10,6 +10,9 @@ export interface Clock {
   clearTimer(timer: unknown): void;
 }
 
+/** Calls `onChange` whenever something in `dir` changes; errors are reported to `onError`. */
+export type WatchFn = (dir: string, onChange: () => void, onError: (err: unknown) => void) => { close(): void };
+
 export interface SchedulerDeps {
   agentsDir: string;
   stateDir: string;
@@ -20,6 +23,8 @@ export interface SchedulerDeps {
   clock?: Clock;
   /** Gets one line per event, already prefixed with the time; stdout by default. */
   log?: (line: string) => void;
+  /** Watches the agents folder; `fs.watch` by default. Injected so tests can fire its events. */
+  watch?: WatchFn;
 }
 
 export interface Scheduler {
@@ -36,6 +41,14 @@ const CATCH_UP_MS = 60 * 60_000;
 const STOP_GRACE_MS = 60_000;
 // setTimeout's limit; a longer wait is re-armed when the timer fires early.
 const MAX_TIMER_MS = 2 ** 31 - 1;
+
+const realWatch: WatchFn = (dir, onChange, onError) => {
+  const watcher = fsWatch(dir, () => onChange());
+  watcher.on('error', onError);
+  // The rescan timer keeps the process alive; the watcher alone should not.
+  watcher.unref();
+  return watcher;
+};
 
 const realClock: Clock = {
   now: () => new Date(),
@@ -207,14 +220,15 @@ export async function startScheduler(deps: SchedulerDeps): Promise<Scheduler> {
   every(RESCAN_MS, reload);
 
   let debounce: unknown;
-  const watcher: FSWatcher = watch(agentsDir, () => {
-    if (stopping) return;
-    clock.clearTimer(debounce);
-    debounce = clock.setTimer(() => { reload(); }, DEBOUNCE_MS);
-  });
-  watcher.on('error', (err) => log(`stopped watching the agents folder: ${message(err)}`));
-  // The rescan timer keeps the process alive; the watcher alone should not.
-  watcher.unref();
+  const watcher = (deps.watch ?? realWatch)(
+    agentsDir,
+    () => {
+      if (stopping) return;
+      clock.clearTimer(debounce);
+      debounce = clock.setTimer(() => { reload(); }, DEBOUNCE_MS);
+    },
+    (err) => log(`stopped watching the agents folder: ${message(err)}`),
+  );
 
   const idle = async () => {
     for (;;) {

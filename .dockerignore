@@ -1,0 +1,11 @@
+.git
+.github
+.scratch
+node_modules
+dist
+state
+workspaces
+secrets.env
+*.log
+docs
+examples

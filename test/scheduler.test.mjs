@@ -56,7 +56,7 @@ async function schedule(f, start, opts = {}) {
     calls.push({ name: agent.name, at: clock.now().toISOString() });
     return record(agent.name, clock.now().toISOString());
   });
-  const scheduler = await startScheduler({ agentsDir: f.agents, stateDir: f.state, run, clock, log: (l) => lines.push(l), keepDays: opts.keepDays });
+  const scheduler = await startScheduler({ agentsDir: f.agents, stateDir: f.state, run, clock, log: (l) => lines.push(l), keepDays: opts.keepDays, watch: opts.watch });
   return { clock, calls, lines, scheduler };
 }
 
@@ -249,18 +249,29 @@ test('added, changed, removed and broken files update their jobs on the next res
 
 test('a change to the folder is picked up through the watcher without waiting for the rescan', async () => {
   const f = await folder();
-  const { clock, lines, scheduler } = await schedule(f, '2026-01-15T00:00:30Z');
+  // The watcher is injected, so the test fires its event instead of racing the operating system's.
+  const watchers = [];
+  const watch = (dir, onChange) => {
+    const watcher = { dir, onChange, closed: false, close() { this.closed = true; } };
+    watchers.push(watcher);
+    return watcher;
+  };
+  const { clock, lines, scheduler } = await schedule(f, '2026-01-15T00:00:30Z', { watch });
+  assert.equal(watchers.length, 1);
+  assert.equal(watchers[0].dir, f.agents);
   await writeFile(path.join(f.agents, 'w.md'), agentFile('w', 'schedule: "0 * * * *"\ntimezone: UTC'));
-  // The watcher's event arrives on its own; then the debounce passes on the fake clock.
-  for (let i = 0; i < 300 && !lines.some((l) => l.includes('scheduled w')); i++) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    clock.advanceTo(new Date(clock.now().getTime() + 100).toISOString());
-    await scheduler.idle();
-  }
-  assert.ok(lines.some((l) => l.includes('scheduled w')));
-  const at = Date.parse(lines.find((l) => l.includes('scheduled w')).slice(0, 24));
-  assert.ok(at < Date.parse('2026-01-15T00:01:30Z'), 'before the 60 s rescan');
+  watchers[0].onChange();
+  // Nothing before the debounce has passed; then the folder is reloaded at once.
+  clock.advanceTo('2026-01-15T00:00:30.400Z');
+  await scheduler.idle();
+  assert.ok(!lines.some((l) => l.includes('scheduled w')));
+  clock.advanceTo('2026-01-15T00:00:31Z');
+  await scheduler.idle();
+  const line = lines.find((l) => l.includes('scheduled w'));
+  assert.ok(line, 'scheduled after the debounce');
+  assert.ok(Date.parse(line.slice(0, 24)) < Date.parse('2026-01-15T00:01:30Z'), 'before the 60 s rescan');
   await scheduler.stop();
+  assert.ok(watchers[0].closed, 'stop closes the watcher');
 });
 
 // Retention and stopping

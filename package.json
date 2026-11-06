@@ -1,14 +1,38 @@
 {
   "name": "nightshift",
   "version": "0.1.0",
-  "description": "Headless Claude Code sessions as personal agents: one Markdown file per agent, run on your own Claude login.",
+  "description": "Personal agents as headless Claude Code sessions: one Markdown file per agent, run on a schedule on your own Claude login, with least privilege.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent-sdk",
+    "ai-agents",
+    "agents",
+    "cron",
+    "scheduler",
+    "automation",
+    "headless"
+  ],
   "license": "MIT",
+  "author": "Ennio Maldonado",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ennio-datatide/nightshift.git"
+  },
+  "homepage": "https://github.com/ennio-datatide/nightshift#readme",
+  "bugs": {
+    "url": "https://github.com/ennio-datatide/nightshift/issues"
+  },
   "type": "module",
   "bin": {
     "nightshift": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "examples",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22"

@@ -52,6 +52,18 @@ test('passes the prompt, cwd, model and maxTurns to query and records the run', 
   assert.ok(Date.parse(written.start) <= Date.parse(written.end));
 });
 
+test('passes effort to the main session, and leaves it out when the file does not set it', async () => {
+  const set = await setup('name: hello\ndescription: Says hello\neffort: low');
+  const withEffort = fakeQuery([success]);
+  await runAgent(set.agent, { query: withEffort.query, stateDir: set.state });
+  assert.equal(withEffort.calls[0].options.effort, 'low');
+
+  const unset = await setup('name: hello\ndescription: Says hello');
+  const without = fakeQuery([success]);
+  await runAgent(unset.agent, { query: without.query, stateDir: unset.state });
+  assert.ok(!('effort' in without.calls[0].options));
+});
+
 test('leaves model and maxTurns out when the file does not set them', async () => {
   const { agent, state } = await setup('name: hello\ndescription: Says hello');
   const { query, calls } = fakeQuery([success]);

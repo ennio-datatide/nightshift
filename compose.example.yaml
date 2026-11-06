@@ -1,0 +1,28 @@
+# Copy to compose.yaml and adjust the paths on the left. Before the first start:
+#   chmod 600 secrets.env   (owned by the user below, who must be able to read it)
+#   mkdir -p workspaces     (owned by the user below)
+services:
+  nightshift:
+    build: .
+    image: nightshift:latest
+    restart: unless-stopped
+    # The daemon waits up to 60 s for running agents on stop; give it that before the kill.
+    stop_grace_period: 75s
+    # Your server user's uid:gid, so agents can write in folders you share with other tools.
+    user: "1000:1000"
+    environment:
+      # The time zone of agents that set no timezone, and of the log lines.
+      TZ: UTC
+    volumes:
+      - ./agents:/agents:ro
+      - ./workspaces:/workspaces
+      - ./secrets.env:/run/secrets.env:ro
+      - state:/state
+      - claude-home:/home/node/.claude
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  state:
+  claude-home:
