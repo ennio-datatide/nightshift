@@ -99,9 +99,14 @@ function readOrEmpty(file: string): Promise<string> {
   });
 }
 
+/** The locks this process holds now, to tell its own runs from a lock left before a restart. */
+const held = new Set<string>();
+
 /**
  * Takes `<stateDir>/<agent>.lock`, holding this process's pid. Returns the release, or undefined
- * when a live process holds it; a lock left by a process that is gone is cleared.
+ * when a live process holds it; a lock left by a process that is gone is cleared. So is a lock with
+ * this process's own pid that it did not take: in a container the daemon is pid 1 after every
+ * restart, so a lock left by the previous daemon would otherwise look alive forever.
  */
 export async function takeLock(stateDir: string, agent: string): Promise<(() => Promise<void>) | undefined> {
   await mkdir(stateDir, { recursive: true });
@@ -109,12 +114,17 @@ export async function takeLock(stateDir: string, agent: string): Promise<(() => 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await writeFile(file, String(process.pid), { flag: 'wx' });
-      return () => rm(file, { force: true });
+      held.add(file);
+      return async () => {
+        held.delete(file);
+        await rm(file, { force: true });
+      };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
     const pid = Number((await readFile(file, 'utf8').catch(() => '')).trim());
-    if (isAlive(pid)) return undefined;
+    const stale = pid === process.pid ? !held.has(file) : !isAlive(pid);
+    if (!stale) return undefined;
     await rm(file, { force: true });
   }
   return undefined;

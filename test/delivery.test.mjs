@@ -125,13 +125,13 @@ test('a second run while one is running is refused and recorded as skipped', asy
   const s = await setup('');
   await mkdir(s.state, { recursive: true });
   const lock = path.join(s.state, 'p.lock');
-  await writeFile(lock, String(process.pid));
+  await writeFile(lock, String(process.ppid));
   const q = fakeQuery([result('x')]);
   const record = await runAgent(s.agent, { query: q.query, stateDir: s.state, secretsFile: s.secretsFile });
   assert.equal(q.calls.length, 0);
   assert.equal(record.status, 'skipped');
   assert.equal(record.result, 'already running');
-  assert.equal(await readFile(lock, 'utf8'), String(process.pid), 'the running one keeps its lock');
+  assert.equal(await readFile(lock, 'utf8'), String(process.ppid), 'the running one keeps its lock');
 });
 
 test('a stale lock whose process is gone is cleared, and the lock is released after the run', async () => {
