@@ -58,10 +58,17 @@ People wait, so the assistant reacts to each message the moment it lands:
 3. **Queue.** Enqueue one job per message in a job queue on the database the app already has. For
    Postgres, use **graphile-worker**: LISTEN/NOTIFY picks the job up immediately, `SKIP LOCKED`
    lets several workers run safely, retries come with backoff, and failed jobs stay visible.
-   [Confirm against the shipped Becario: job name, concurrency, retry count.]
-4. **Worker.** A long-running worker takes each job and runs the assistant for that one message
-   with a fast model (Haiku). Concurrency 2 to 3 answers several people at once. Make the job
-   idempotent by message id, so a retry never answers twice.
+   The webhook saves the message and adds its job in the same database, so a saved message always
+   has a job. Our Becario: `graphile_worker.add_job('becario_responder', {messageId}, job_key :=
+   'msg-<id>', max_attempts := 4)`; the job key makes a second enqueue of the same message a no-op.
+4. **Worker.** A small long-running container next to Nightshift (ours: `crew/worker/worker.mjs`,
+   graphile-worker 0.18.0, pinned) takes each job and runs a per-message Nightshift agent for that
+   one message (ours: `becario-respuesta`, Haiku, the message id in its environment, the same rules,
+   review and fixed replies; its gate refuses a message that already has a reply). Concurrency 3.
+   After the run the worker checks that the reply exists; if not, it fails the job, and
+   graphile-worker retries it with exponential backoff, up to 4 attempts. Jobs that fail all four
+   show on the owner's admin page with their error. On start, the worker re-queues any message from
+   the last 30 minutes that has no reply. No cron schedule anywhere.
 5. **Reply.** Send through the channel API with retries (a single network hiccup lost a reply in
    our tests), then store the answer next to the question.
 
@@ -70,6 +77,11 @@ agent's start-up, and the owner reads that as "no contesta". Why not a separate 
 RabbitMQ: at a few hundred messages a day it is one more service to run, while the database the
 app already has queues them fine. Name the alternatives if the owner asks: pg-boss (Postgres),
 BullMQ (Redis), Inngest or Trigger.dev (hosted).
+
+What we measured (Telegram, message saved to reply sent): with a schedule every 2 minutes and
+Sonnet, about 90 s; with the queue and Haiku, about 5 s for a fixed reply and 15 to 45 s for an
+answer that searches the owner's guides and passes the review. The agent's start-up is now the whole
+delay, not the queue.
 
 Done when a message sent from the real app gets its answer in under a minute, measured.
 
@@ -127,7 +139,9 @@ is.
 - Messages sent before the webhook existed are lost or answered by old code: tell the owner to
   write again after the deploy.
 - The reviewer rejected good answers that named the student's own tools (Stripe, MailerLite).
-- "Esta semana" failed until the assistant had a calendar command.
+- "Esta semana" failed until the assistant had a calendar command. A per-message agent needs the
+  current week and the calendar in its own context too: our loop agent had a `semana` command and
+  the first per-message agent did not use it, so «que deberes hay esta semana» went to the owner.
 - A reply lost on one failed send: retries on every outgoing call.
 - Meta apps that are Live refuse `localhost` OAuth redirects: connect Meta's tools with a token.
 - Meta's approval windows open as separate popups: bring them to the front for the owner.
