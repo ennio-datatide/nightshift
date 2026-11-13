@@ -52,6 +52,9 @@ A Pro or Max login is for the owner's own work: their files, their reports, draf
 Anything that serves other people (customers, students, a public bot) needs an API key and
 `billing: api`. Say so when a job crosses that line, and point to the README's "Terms" section.
 
+An agent that answers other people's messages (a bot, an assistant for customers or students) is
+an **assistant**: build it with [nightshift-assistant](../nightshift-assistant/SKILL.md).
+
 ## When it goes wrong
 
 `nightshift runs <name>` shows each run's status and first line. `gate-error`: run the gate by hand
