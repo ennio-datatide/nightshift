@@ -6,6 +6,7 @@ services:
     build: .
     image: nightshift:latest
     restart: unless-stopped
+    cpu_shares: 512  # below the web app (2048) on a shared server, so agents never slow down the site
     # The daemon waits up to 60 s for running agents on stop; give it that before the kill.
     stop_grace_period: 75s
     # Your server user's uid:gid, so agents can write in folders you share with other tools.
